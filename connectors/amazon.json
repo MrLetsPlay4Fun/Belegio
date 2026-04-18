@@ -1,0 +1,41 @@
+{
+  "id": "amazon-de",
+  "name": "Amazon DE",
+  "version": "1.1.0",
+  "baseUrl": "https://www.amazon.de",
+  "loginUrl": "https://www.amazon.de/gp/sign-in.html",
+  "loginCheckUrl": "https://www.amazon.de/gp/css/order-history",
+  "loginCheck": {
+    "type": "element_exists",
+    "selector": "#ordersContainer, .order-card, .order, #orderList"
+  },
+  "invoiceSteps": [
+    {
+      "type": "foreach_years",
+      "url_template": "https://www.amazon.de/gp/css/order-history?orderFilter=year-{year}",
+      "steps": [
+        {
+          "type": "paginate",
+          "next_selector": ".a-last:not(.a-disabled) a",
+          "max_pages": 20,
+          "steps": [
+            {
+              "type": "loop_items",
+              "item_selector": ".order-card",
+              "date_selector": ".a-span3 .a-color-secondary, .a-column.a-span3 .value",
+              "steps": [
+                {
+                  "type": "download",
+                  "selector": "a[href*='/invoice/'], a[href*='invoice'][href$='.pdf']",
+                  "optional": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "outputPath": "Amazon/{year}/{month}",
+  "downloadExtensions": [".pdf"]
+}

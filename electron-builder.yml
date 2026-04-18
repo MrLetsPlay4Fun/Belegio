@@ -1,0 +1,45 @@
+appId: one.hippler.belegio
+productName: Belegio
+copyright: Copyright © 2025 Alexander Hippler
+
+directories:
+  buildResources: assets
+  output: release
+
+# Dateien die ins App-Paket kommen
+files:
+  - dist/**
+  - connectors/**
+  - package.json
+
+# playwright aus dem asar-Archiv auspacken, damit Node.js-Internals
+# (child_process, Pfadauflösung) korrekt funktionieren
+asarUnpack:
+  - node_modules/playwright/**
+  - node_modules/playwright-core/**
+
+win:
+  icon: assets/icon.ico
+  # Keine Code-Signatur (kein Zertifikat vorhanden)
+  sign: null
+  signingHashAlgorithms: null
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  installerLanguages:
+    - de_DE
+  license: null
+
+# GitHub Releases – Upload erfolgt mit: GH_TOKEN=... npm run dist
+publish:
+  provider: github
+  owner: MrLetsPlay4Fun
+  repo: Belegio
+  releaseType: release

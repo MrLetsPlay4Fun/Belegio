@@ -1,0 +1,23 @@
+node_modules/
+dist/
+release/
+downloads/*
+!downloads/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Umgebungsvariablen (GH_TOKEN etc. – niemals einchecken!)
+.env
+.env.*
+
+# Claude Code Projekteinstellungen
+.claude/
+
+# electron-builder temporäre Dateien
+app-update.yml
