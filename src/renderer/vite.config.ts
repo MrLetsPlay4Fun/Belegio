@@ -12,5 +12,8 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../../dist/renderer'),
     emptyOutDir: true,
+    // Relative Pfade für Electron file:// Protokoll
+    assetsDir: 'assets',
   },
+  base: './',
 })
