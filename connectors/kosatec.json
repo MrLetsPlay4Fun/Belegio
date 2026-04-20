@@ -1,0 +1,68 @@
+{
+  "id": "kosatec",
+  "name": "Kosatec",
+  "version": "1.0.0",
+  "baseUrl": "https://shop.kosatec.de",
+  "loginUrl": "https://shop.kosatec.de/account/login",
+  "loginCheckUrl": "https://shop.kosatec.de/account",
+  "loginCheck": {
+    "type": "url_not_contains",
+    "value": "/account/login"
+  },
+  "authUrlPatterns": ["/account/login"],
+  "dateLocale": "dmy",
+  "invoiceSteps": [
+    {
+      "type": "navigate",
+      "url": "https://shop.kosatec.de/account/orders"
+    },
+    {
+      "type": "wait_for",
+      "selector": "table tbody tr, .order-item, [class*='order-row']",
+      "timeout": 8000
+    },
+    {
+      "type": "paginate",
+      "next_selector": "a[rel='next'], .pagination .next a, li.next a, a:has-text('»'), a:has-text('Nächste')",
+      "max_pages": 50,
+      "steps": [
+        {
+          "type": "loop_items",
+          "item_selector": "table tbody tr",
+          "date_selector": "td:nth-child(2), [class*='date'], time",
+          "id_selector": "a[href*='/account/orders/']",
+          "id_attribute": "href",
+          "steps": [
+            {
+              "type": "navigate_link",
+              "selector": "a[href*='/account/orders/']"
+            },
+            {
+              "type": "wait_for",
+              "selector": "a:has-text('Rechnung herunterladen'), button:has-text('Rechnung herunterladen'), a:has-text('Rechnung'), a[href*='invoice'], a[href*='rechnung']",
+              "timeout": 6000
+            },
+            {
+              "type": "download",
+              "selector": "a:has-text('Rechnung herunterladen'), button:has-text('Rechnung herunterladen'), a:has-text('Rechnung'), a[href*='invoice'], a[href*='rechnung']",
+              "filename_pattern": "Kosatec_{id}",
+              "mode": "browser",
+              "optional": true
+            },
+            {
+              "type": "navigate",
+              "url": "https://shop.kosatec.de/account/orders"
+            },
+            {
+              "type": "wait_for",
+              "selector": "table tbody tr, .order-item",
+              "timeout": 8000
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "outputPath": "Kosatec/{year}/{month}",
+  "downloadExtensions": [".pdf"]
+}

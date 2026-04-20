@@ -1,6 +1,8 @@
+import fs from 'fs'
+import path from 'path'
 import type { ConnectorDef } from '../../shared/connector.types'
 import { checkLogin } from './session-manager'
-import { openPersistentContext } from '../browser/playwright-manager'
+import { openPersistentContext, getProfileDir } from '../browser/playwright-manager'
 
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000 // 5 Minuten
 const POLL_INTERVAL_MS = 2000
@@ -43,12 +45,8 @@ export async function waitForManualLogin(
 
       // Solange wir im Amazon Auth-Flow sind (/ap/), nicht navigieren
       const currentUrl = page.url()
-      const onAuthPage =
-        currentUrl.includes('/ap/') ||
-        currentUrl.includes('signin') ||
-        currentUrl.includes('sign-in') ||
-        currentUrl.includes('auth-challenge') ||
-        currentUrl.includes('authentication')
+      const authPatterns = connector.authUrlPatterns ?? ['/ap/', 'signin', 'sign-in', 'auth-challenge', 'authentication']
+      const onAuthPage = authPatterns.some(p => currentUrl.includes(p))
 
       if (!onAuthPage) {
         // Zur Check-URL navigieren und Login-Element suchen
@@ -64,7 +62,16 @@ export async function waitForManualLogin(
 
         if (loggedIn) {
           onStatus?.('Anmeldung erkannt, schließe Browser...')
-          // Context schließen → Profil-Ordner behält alle Cookies automatisch
+          // Cookies explizit sichern — Session-Cookies (ohne Ablaufdatum) werden
+          // vom Browser nicht auf die Festplatte geschrieben und gehen sonst verloren.
+          try {
+            const cookies = await context.cookies()
+            const cookiePath = path.join(getProfileDir(connector.id), 'saved-cookies.json')
+            fs.writeFileSync(cookiePath, JSON.stringify(cookies))
+            console.log(`[Login-Fenster] ${cookies.length} Cookies gesichert`)
+          } catch (e) {
+            console.log(`[Login-Fenster] Cookie-Sicherung fehlgeschlagen: ${e}`)
+          }
           await context.close()
           return
         }

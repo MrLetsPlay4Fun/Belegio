@@ -2,12 +2,11 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import type { Page, Locator } from 'playwright'
-import type { Step } from '../../shared/connector.types'
+import type { Step, ConnectorDef } from '../../shared/connector.types'
 import { addDownloadRecord } from '../store/app-store'
-import type { DownloadRecord } from '../../shared/download.types'
 
 function ts(): string {
-  return new Date().toISOString().slice(11, 23) // HH:MM:SS.mmm
+  return new Date().toISOString().slice(11, 23)
 }
 
 export interface ExecutionContext {
@@ -15,24 +14,35 @@ export interface ExecutionContext {
   outputDir: string
   year: string
   month: string
-  startDate?: string  // ISO "YYYY-MM-DD" — älteste gewünschte Bestellung
+  startDate?: string
   itemLocator?: Locator
   onProgress?: (message: string, downloadCount: number) => void
   downloadCount?: { value: number }
-  shouldStop?: boolean  // Signal: Paginierung sofort beenden (alle weiteren Einträge sind zu alt)
+  shouldStop?: boolean
+  connector?: ConnectorDef
+  itemId?: string
 }
 
-function isSigninPage(url: string): boolean {
-  return url.includes('/ap/signin') || url.includes('/ap/sign-in') || url.includes('openid.mode=checkid_setup')
+// ─── Auth-Seiten-Erkennung ────────────────────────────────────────────────────
+
+function isAuthPage(url: string, connector?: ConnectorDef): boolean {
+  const patterns = connector?.authUrlPatterns ?? ['/ap/signin', '/ap/sign-in', 'openid.mode=checkid_setup']
+  return patterns.some(p => url.includes(p))
 }
+
+// ─── Datum-Parser ─────────────────────────────────────────────────────────────
 
 const GERMAN_MONTHS: Record<string, number> = {
   januar: 0, februar: 1, märz: 2, april: 3, mai: 4, juni: 5,
   juli: 6, august: 7, september: 8, oktober: 9, november: 10, dezember: 11,
 }
 
+const ENGLISH_MONTHS: Record<string, number> = {
+  january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+  july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+}
+
 function parseGermanDate(text: string): Date | null {
-  // Format: "14. April 2026" oder "Bestellt am 14. April 2026"
   const match = text.match(/(\d{1,2})\.\s+(\w+)\s+(\d{4})/)
   if (!match) return null
   const day = parseInt(match[1])
@@ -41,6 +51,62 @@ function parseGermanDate(text: string): Date | null {
   if (month === undefined || isNaN(day) || isNaN(year)) return null
   return new Date(year, month, day)
 }
+
+function parseEnglishDate(text: string): Date | null {
+  const match = text.match(/(\w+)\s+(\d{1,2}),?\s+(\d{4})/)
+  if (!match) return null
+  const month = ENGLISH_MONTHS[match[1].toLowerCase()]
+  const day = parseInt(match[2])
+  const year = parseInt(match[3])
+  if (month === undefined || isNaN(day) || isNaN(year)) return null
+  return new Date(year, month, day)
+}
+
+function parseDmyDate(text: string): Date | null {
+  const match = text.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/)
+  if (!match) return null
+  const day = parseInt(match[1])
+  const month = parseInt(match[2]) - 1
+  const year = parseInt(match[3])
+  if (isNaN(day) || isNaN(month) || isNaN(year)) return null
+  return new Date(year, month, day)
+}
+
+function parseIsoDate(text: string): Date | null {
+  const match = text.match(/(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+  const year = parseInt(match[1])
+  const month = parseInt(match[2]) - 1
+  const day = parseInt(match[3])
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null
+  return new Date(year, month, day)
+}
+
+function parseDate(text: string, locale: string = 'de'): Date | null {
+  if (locale === 'en')  return parseEnglishDate(text) ?? parseGermanDate(text)
+  if (locale === 'dmy') return parseDmyDate(text)
+  if (locale === 'iso') return parseIsoDate(text)
+  return parseGermanDate(text)
+}
+
+// ─── Dateiname aufbauen ───────────────────────────────────────────────────────
+
+function buildFilename(
+  pattern: string | undefined,
+  vars: { id?: string; year?: string; month?: string; date?: string }
+): string {
+  const id = vars.id ?? Date.now().toString()
+  if (!pattern) return `Beleg_${id}.pdf`
+  let name = pattern
+    .replace(/\{id\}/g, id)
+    .replace(/\{year\}/g, vars.year ?? '')
+    .replace(/\{month\}/g, vars.month ?? '')
+    .replace(/\{date\}/g, vars.date ?? '')
+  if (!name.toLowerCase().endsWith('.pdf')) name += '.pdf'
+  return name
+}
+
+// ─── Hilfsfunktionen ─────────────────────────────────────────────────────────
 
 function resolveUrl(url: string, ctx: ExecutionContext): string {
   return url
@@ -61,26 +127,12 @@ function getUniquePath(filePath: string): string {
   }
 }
 
-async function savePageAsPdf(
-  invoicePage: import('playwright').Page,
-  orderId: string,
+function recordDownload(
   ctx: ExecutionContext,
+  finalPath: string,
+  size: number,
   counter: { value: number }
-): Promise<void> {
-  await invoicePage.waitForTimeout(2000)
-  const filename = `Rechnung_${orderId}.pdf`
-  const destPath = path.join(ctx.outputDir, filename)
-  const finalPath = getUniquePath(destPath)
-
-  await invoicePage.pdf({
-    path: finalPath,
-    format: 'A4',
-    printBackground: true,
-    margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
-  })
-  console.log(`[${ts()}] [download] ✓ Gespeichert als PDF: ${path.basename(finalPath)}`)
-
-  const size = fs.statSync(finalPath).size
+): void {
   addDownloadRecord({
     id: crypto.randomUUID(),
     connectorId: ctx.connectorId,
@@ -93,137 +145,218 @@ async function savePageAsPdf(
   ctx.onProgress?.(`Heruntergeladen: ${path.basename(finalPath)}`, counter.value)
 }
 
+async function savePageAsPdf(
+  invoicePage: import('playwright').Page,
+  itemId: string,
+  filenamePattern: string | undefined,
+  ctx: ExecutionContext,
+  counter: { value: number },
+  outputDir: string
+): Promise<void> {
+  await invoicePage.waitForTimeout(2000)
+  const filename = buildFilename(filenamePattern, { id: itemId, year: ctx.year, month: ctx.month })
+  const destPath = path.join(outputDir, filename)
+  const finalPath = getUniquePath(destPath)
+  await invoicePage.pdf({
+    path: finalPath,
+    format: 'A4',
+    printBackground: true,
+    margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
+  })
+  console.log(`[${ts()}] [download] ✓ Gespeichert als PDF: ${path.basename(finalPath)}`)
+  const size = fs.statSync(finalPath).size
+  recordDownload(ctx, finalPath, size, counter)
+}
+
+// ─── Download-Logik ───────────────────────────────────────────────────────────
+
+type DownloadStep = Extract<Step, { type: 'download' }>
+
 async function executeDownload(
   page: Page,
-  selector: string,
-  optional: boolean,
+  step: DownloadStep,
   ctx: ExecutionContext
 ): Promise<void> {
   const counter = ctx.downloadCount ?? { value: 0 }
   ctx.downloadCount = counter
 
+  // {year}/{month} im outputDir auflösen — foreach_years macht das selbst,
+  // aber paginate/loop_items-Connectors (z.B. Kosatec) brauchen es hier.
+  const outputDir = ctx.outputDir
+    .replace('{year}', ctx.year)
+    .replace('{month}', ctx.month)
+
   const target = ctx.itemLocator
-    ? ctx.itemLocator.locator(selector).first()
-    : page.locator(selector).first()
+    ? ctx.itemLocator.locator(step.selector).first()
+    : page.locator(step.selector).first()
 
   try {
-    // Kurzes Timeout: Invoice-Links sind sofort im DOM, wenn vorhanden.
-    // Für optionale Elemente spart ein kurzes Timeout ~2,5 s pro Bestellung ohne Rechnung.
-    await target.waitFor({ state: 'attached', timeout: optional ? 800 : 3000 })
-    console.log(`[${ts()}] [download] ✓ Element gefunden: ${selector}`)
+    await target.waitFor({ state: 'attached', timeout: step.optional ? 800 : 3000 })
+    console.log(`[${ts()}] [download] ✓ Element gefunden: ${step.selector}`)
   } catch {
-    if (optional) {
-      console.log(`[${ts()}] [download] – Nicht gefunden (optional): ${selector}`)
+    if (step.optional) {
+      console.log(`[${ts()}] [download] – Nicht gefunden (optional): ${step.selector}`)
       return
     }
-    throw new Error(`Download-Element nicht gefunden: ${selector}`)
+    throw new Error(`Download-Element nicht gefunden: ${step.selector}`)
   }
 
-  // href holen und absolute URL bauen
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true })
+  }
+
+  // ── Modus 'browser': Playwright Download-Event abfangen ────────────────────
+  if (step.mode === 'browser') {
+    try {
+      const download = await new Promise<import('playwright').Download>((resolve, reject) => {
+        const TIMEOUT_MS = 20000
+        const timer = setTimeout(
+          () => reject(new Error(`Browser-Download Timeout nach ${TIMEOUT_MS / 1000}s`)),
+          TIMEOUT_MS
+        )
+        const done = (dl: import('playwright').Download) => { clearTimeout(timer); resolve(dl) }
+        page.once('download', done)
+        page.context().once('page', async (newPage) => {
+          try {
+            const dl = await newPage.waitForEvent('download', { timeout: TIMEOUT_MS - 1000 })
+            done(dl)
+          } catch { /* ignorieren */ }
+        })
+        target.click().catch(reject)
+      })
+      const suggested = download.suggestedFilename()
+      const itemId = ctx.itemId ?? suggested.replace(/\.pdf$/i, '') ?? Date.now().toString()
+      const filename = buildFilename(step.filename_pattern, { id: itemId, year: ctx.year, month: ctx.month })
+      const destPath = path.join(outputDir, filename)
+      const finalPath = getUniquePath(destPath)
+      await download.saveAs(finalPath)
+      console.log(`[${ts()}] [download] ✓ Browser-Download: ${path.basename(finalPath)}`)
+      const size = fs.statSync(finalPath).size
+      recordDownload(ctx, finalPath, size, counter)
+    } catch (err) {
+      console.log(`[download] Browser-Download Fehler: ${err instanceof Error ? err.message : err}`)
+      if (step.optional) return
+      throw err
+    }
+    return
+  }
+
+  // ── href holen und absolute URL bauen ────────────────────────────────────────
   const href = await target.getAttribute('href').catch(() => null)
   if (!href) {
-    if (optional) {
+    if (step.optional) {
       console.log(`[download] – Kein href-Attribut, übersprungen`)
       return
     }
-    throw new Error(`Kein href für Download-Element: ${selector}`)
+    throw new Error(`Kein href für Download-Element: ${step.selector}`)
   }
   const invoiceUrl = href.startsWith('http') ? href : new URL(href, page.url()).toString()
   console.log(`[${ts()}] [download] Invoice-URL: ${invoiceUrl}`)
 
-  // Order-ID aus URL extrahieren (für Dateinamen)
-  const orderId =
-    invoiceUrl.match(/[?&]orderId=([A-Z0-9-]+)/i)?.[1] ||
-    invoiceUrl.match(/[?&]orderID=([A-Z0-9-]+)/i)?.[1] ||
-    invoiceUrl.match(/\/([0-9]{3}-[0-9]{7}-[0-9]{7})/)?.[1] ||
-    Date.now().toString()
-
-  if (!fs.existsSync(ctx.outputDir)) {
-    fs.mkdirSync(ctx.outputDir, { recursive: true })
+  // ── downloadExtensions filtern ────────────────────────────────────────────────
+  const allowed = ctx.connector?.downloadExtensions
+  if (allowed && allowed.length > 0) {
+    try {
+      const ext = path.extname(new URL(invoiceUrl).pathname).toLowerCase()
+      if (ext && !allowed.includes(ext)) {
+        console.log(`[${ts()}] [download] – Übersprungen (Endung "${ext}" nicht erlaubt)`)
+        return
+      }
+    } catch { /* URL-Parse-Fehler ignorieren */ }
   }
 
-  const context = page.context()
+  // ID für Dateinamen
+  const itemId = ctx.itemId
+    ?? invoiceUrl.match(/[?&]orderId=([A-Z0-9-]+)/i)?.[1]
+    ?? invoiceUrl.match(/[?&]orderID=([A-Z0-9-]+)/i)?.[1]
+    ?? invoiceUrl.match(/\/([0-9]{3}-[0-9]{7}-[0-9]{7})/)?.[1]
+    ?? Date.now().toString()
 
   try {
     let resolvedUrl: string | null = null
-    let isPdfDownload = false
+    let isPdfFetch = false
 
-    if (invoiceUrl.includes('/invoice/') || invoiceUrl.includes('popover')) {
-      console.log(`[${ts()}] [download] Lade Popover für Order ${orderId}…`)
-      // Popover per page.evaluate(fetch) laden — läuft im Browser-Kontext mit
-      // allen Browser-Headers (Referer, User-Agent, Cookies). page.request würde
-      // Amazon-seitig als fremder Request erkannt und gibt leeres HTML zurück.
-      const popoverHtml = await page.evaluate(async (url: string) => {
+    const useFetch = step.mode === 'fetch' || (
+      !step.mode && (invoiceUrl.includes('/invoice/') || invoiceUrl.includes('popover'))
+    )
+
+    if (useFetch) {
+      console.log(`[${ts()}] [download] Lade per Fetch für ID ${itemId}…`)
+
+      type FetchResult = { type: 'pdf'; base64: string } | { type: 'html'; text: string } | null
+      const fetched = await page.evaluate(async (url: string) => {
         try {
           const r = await fetch(url, { credentials: 'include' })
-          return r.ok ? r.text() : null
+          if (!r.ok) return null
+          const buf = await r.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+            let binary = ''
+            const chunk = 8192
+            for (let i = 0; i < bytes.length; i += chunk) {
+              binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + chunk, bytes.length)))
+            }
+            return { type: 'pdf', base64: btoa(binary) }
+          }
+          return { type: 'html', text: new TextDecoder().decode(bytes) }
         } catch { return null }
-      }, invoiceUrl).catch(() => null) as string | null
+      }, invoiceUrl).catch(() => null) as FetchResult
 
-      if (popoverHtml) {
-        // 1) Direkter PDF-Download (/documents/download/…pdf)
-        const pdfMatch = popoverHtml.match(/href="(\/documents\/download\/[^"]+\.pdf)"/)
-        if (pdfMatch) {
-          resolvedUrl = new URL(pdfMatch[1], page.url()).toString()
-          isPdfDownload = true
-          console.log(`[${ts()}] [download] PDF-Link: ${resolvedUrl}`)
-        }
+      if (fetched?.type === 'pdf') {
+        const pdfBuffer = Buffer.from(fetched.base64, 'base64')
+        const filename = buildFilename(step.filename_pattern, { id: itemId, year: ctx.year, month: ctx.month })
+        const destPath = path.join(outputDir, filename)
+        const finalPath = getUniquePath(destPath)
+        fs.writeFileSync(finalPath, pdfBuffer)
+        console.log(`[${ts()}] [download] ✓ ${path.basename(finalPath)} (${pdfBuffer.length} Bytes, direkt)`)
+        recordDownload(ctx, finalPath, pdfBuffer.length, counter)
+        return
+      }
 
-        // 2) Beliebiger PDF-Link mit .pdf-Endung (auch absolute URLs)
+      const fetchedHtml = fetched?.type === 'html' ? fetched.text : null
+
+      if (fetchedHtml) {
+        const m1 = fetchedHtml.match(/href="(\/documents\/download\/[^"]+\.pdf)"/)
+        if (m1) { resolvedUrl = new URL(m1[1], page.url()).toString(); isPdfFetch = true }
+
         if (!resolvedUrl) {
-          const anyPdfMatch = popoverHtml.match(/href="(https?:\/\/[^"]+\.pdf[^"]*)"/)
-          if (anyPdfMatch) {
-            resolvedUrl = anyPdfMatch[1].replace(/&amp;/g, '&')
-            isPdfDownload = true
-            console.log(`[${ts()}] [download] Absoluter PDF-Link: ${resolvedUrl}`)
-          }
-        }
-
-        // 3) print.html-Fallback (HTML-Seite als PDF drucken)
-        if (!resolvedUrl) {
-          const printMatch = popoverHtml.match(/href="(\/gp\/css\/summary\/print\.html[^"]*)"/)
-          if (printMatch) {
-            resolvedUrl = new URL(printMatch[1].replace(/&amp;/g, '&'), page.url()).toString()
-            console.log(`[${ts()}] [download] print.html-Fallback: ${resolvedUrl}`)
-          }
-        }
-
-        // 4) Generischer Download-Link (/gp/css/... oder /your-orders/...)
-        if (!resolvedUrl) {
-          const genericMatch = popoverHtml.match(/href="(\/(?:gp\/css\/[^"]+|your-orders\/[^"]+download[^"]+))"/)
-          if (genericMatch) {
-            resolvedUrl = new URL(genericMatch[1].replace(/&amp;/g, '&'), page.url()).toString()
-            console.log(`[${ts()}] [download] Generischer Download-Link: ${resolvedUrl}`)
-          }
+          const m2 = fetchedHtml.match(/href="(https?:\/\/[^"]+\.pdf[^"]*)"/)
+          if (m2) { resolvedUrl = m2[1].replace(/&amp;/g, '&'); isPdfFetch = true }
         }
 
         if (!resolvedUrl) {
-          // Debug: ersten 2000 Zeichen loggen damit wir das echte HTML sehen
-          console.log(`[${ts()}] [download] POPOVER-HTML (kein Match):\n${popoverHtml.slice(0, 2000)}`)
+          const m3 = fetchedHtml.match(/href="(\/gp\/css\/summary\/print\.html[^"]*)"/)
+          if (m3) resolvedUrl = new URL(m3[1].replace(/&amp;/g, '&'), page.url()).toString()
+        }
+
+        if (!resolvedUrl) {
+          const m4 = fetchedHtml.match(/href="(\/(?:gp\/css\/[^"]+|your-orders\/[^"]+download[^"]+))"/)
+          if (m4) resolvedUrl = new URL(m4[1].replace(/&amp;/g, '&'), page.url()).toString()
+        }
+
+        if (!resolvedUrl) {
+          console.log(`[${ts()}] [download] FETCH-HTML (kein Match):\n${fetchedHtml.slice(0, 2000)}`)
         }
       } else {
-        console.log(`[${ts()}] [download] Popover-Fetch ergab null (Session abgelaufen?)`)
+        console.log(`[${ts()}] [download] Fetch ergab null (Session abgelaufen oder kein Inhalt?)`)
       }
 
       if (!resolvedUrl) {
-        console.log(`[${ts()}] [download] – Kein Rechnungslink im Popover, übersprungen`)
-        if (optional) return
-        throw new Error(`Kein Rechnungslink für Order ${orderId}`)
+        console.log(`[${ts()}] [download] – Kein Link gefunden, übersprungen`)
+        if (step.optional) return
+        throw new Error(`Kein Download-Link für ID ${itemId}`)
       }
     } else {
       resolvedUrl = invoiceUrl
     }
 
-    if (isPdfDownload) {
-      // PDF als Base64-String übertragen — String-IPC ist ~10× schneller als
-      // Array<number>-IPC (kein Overhead durch 100.000 einzelne Zahlen).
+    if (isPdfFetch) {
       const pdfBase64 = await page.evaluate(async (url: string) => {
         try {
           const r = await fetch(url, { credentials: 'include' })
           if (!r.ok) return null
           const buf = await r.arrayBuffer()
           const bytes = new Uint8Array(buf)
-          // Base64 in Chunks (verhindert Stack-Overflow bei großen PDFs)
           let binary = ''
           const chunk = 8192
           for (let i = 0; i < bytes.length; i += chunk) {
@@ -235,24 +368,21 @@ async function executeDownload(
 
       if (pdfBase64) {
         const pdfBuffer = Buffer.from(pdfBase64, 'base64')
-        const fn = `Rechnung_${orderId}.pdf`
-        const dp = path.join(ctx.outputDir, fn)
-        const fp = getUniquePath(dp)
-        fs.writeFileSync(fp, pdfBuffer)
-        console.log(`[${ts()}] [download] ✓ ${path.basename(fp)} (${pdfBuffer.length} Bytes)`)
-        addDownloadRecord({ id: crypto.randomUUID(), connectorId: ctx.connectorId, filename: path.basename(fp), filePath: fp, downloadedAt: new Date().toISOString(), size: pdfBuffer.length })
-        counter.value++
-        ctx.onProgress?.(`Heruntergeladen: ${path.basename(fp)}`, counter.value)
+        const filename = buildFilename(step.filename_pattern, { id: itemId, year: ctx.year, month: ctx.month })
+        const destPath = path.join(outputDir, filename)
+        const finalPath = getUniquePath(destPath)
+        fs.writeFileSync(finalPath, pdfBuffer)
+        console.log(`[${ts()}] [download] ✓ ${path.basename(finalPath)} (${pdfBuffer.length} Bytes)`)
+        recordDownload(ctx, finalPath, pdfBuffer.length, counter)
       } else {
-        console.log(`[${ts()}] [download] – PDF-Download fehlgeschlagen`)
-        if (!optional) throw new Error(`PDF-Download fehlgeschlagen für Order ${orderId}`)
+        console.log(`[${ts()}] [download] – PDF-Fetch fehlgeschlagen`)
+        if (!step.optional) throw new Error(`PDF-Fetch fehlgeschlagen für ID ${itemId}`)
       }
     } else {
-      // HTML-Seite (print.html) als PDF speichern
       const invoicePage = await page.context().newPage()
       try {
         await invoicePage.goto(resolvedUrl!, { waitUntil: 'domcontentloaded', timeout: 20000 })
-        await savePageAsPdf(invoicePage, orderId, ctx, counter)
+        await savePageAsPdf(invoicePage, itemId, step.filename_pattern, ctx, counter, outputDir)
       } finally {
         await invoicePage.close().catch(() => null)
       }
@@ -260,16 +390,47 @@ async function executeDownload(
 
   } catch (err) {
     console.log(`[download] Fehler: ${err instanceof Error ? err.message : err}`)
-    if (optional) return
+    if (step.optional) return
     throw err
   }
 }
+
+// ─── Step-Ausführung ─────────────────────────────────────────────────────────
 
 export async function executeStep(page: Page, step: Step, ctx: ExecutionContext): Promise<void> {
   switch (step.type) {
     case 'navigate': {
       const url = resolveUrl(step.url, ctx)
       await page.goto(url, { waitUntil: 'domcontentloaded' })
+      break
+    }
+
+    case 'navigate_link': {
+      const target = ctx.itemLocator
+        ? ctx.itemLocator.locator(step.selector).first()
+        : page.locator(step.selector).first()
+      try {
+        await target.waitFor({ state: 'visible', timeout: 3000 })
+      } catch {
+        if (step.optional) {
+          console.log(`[navigate_link] – Nicht gefunden (optional): ${step.selector}`)
+          return
+        }
+        throw new Error(`navigate_link Element nicht gefunden: ${step.selector}`)
+      }
+      const href = await target.getAttribute('href').catch(() => null)
+      ctx.itemLocator = undefined
+      if (href) {
+        const url = href.startsWith('http') ? href : new URL(href, page.url()).toString()
+        console.log(`[navigate_link] Navigiere zu: ${url}`)
+        await page.goto(url, { waitUntil: 'domcontentloaded' })
+      } else {
+        console.log(`[navigate_link] Kein href, klicke und warte auf Navigation`)
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => null),
+          target.click(),
+        ])
+      }
       break
     }
 
@@ -298,13 +459,13 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
           : page.locator(step.selector).first()
         await target.waitFor({ state: 'attached', timeout: step.timeout ?? 5000 })
       } catch {
-        // Optional — kein Fehler wenn Element nicht erscheint
+        // Kein Fehler — Element ist möglicherweise optional
       }
       break
     }
 
     case 'download': {
-      await executeDownload(page, step.selector, step.optional ?? false, ctx)
+      await executeDownload(page, step, ctx)
       break
     }
 
@@ -312,27 +473,37 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
       await page.waitForSelector(step.item_selector, { timeout: 10000 }).catch(() => null)
       const count = await page.locator(step.item_selector).count()
       console.log(`[${ts()}] [loop_items] Gefundene Elemente für "${step.item_selector}": ${count} auf ${page.url()}`)
+      const locale = ctx.connector?.dateLocale ?? 'de'
+
       for (let i = 0; i < count; i++) {
         const itemLocator = page.locator(step.item_selector).nth(i)
 
-        // Datumsfilter: Bestellung überspringen wenn sie vor ctx.startDate liegt.
-        // Amazon sortiert Bestellungen von neu → alt, daher: beim ersten zu-alten Eintrag
-        // sofort ALLES abbrechen (shouldStop-Signal für paginate/foreach_years).
+        // ── itemId aus id_selector extrahieren ─────────────────────────────────
+        let itemId: string | undefined
+        if (step.id_selector) {
+          try {
+            const idEl = itemLocator.locator(step.id_selector).first()
+            const attr = step.id_attribute ?? 'href'
+            const raw = await idEl.getAttribute(attr, { timeout: 800 }).catch(() => null)
+            if (raw) {
+              itemId = raw.split('/').pop()?.split('?')[0] ?? undefined
+            }
+          } catch { /* ignorieren */ }
+        }
+
+        // ── Datumsfilter ────────────────────────────────────────────────────────
         if (ctx.startDate) {
           let dateText: string | null = null
           if (step.date_selector) {
-            // Kurzes Timeout: wenn das Element nicht sofort da ist, schnell zum Fallback
-            dateText = await itemLocator.locator(step.date_selector).first().textContent({ timeout: 800 }).catch(() => null)
+            dateText = await itemLocator.locator(step.date_selector).first()
+              .textContent({ timeout: 800 }).catch(() => null)
           }
-          if (!dateText || !parseGermanDate(dateText)) {
-            // Gezielter In-Browser-Suche nach Datumsmuster — vermeidet den teuren
-            // textContent()-Aufruf der gesamten Bestellkarte (mehrere KB HTML).
+          if (!dateText || !parseDate(dateText, locale)) {
             const elementHandle = await itemLocator.elementHandle({ timeout: 2000 }).catch(() => null)
             dateText = await page.evaluate((card) => {
               if (!card) return null
-              // Alle Textnodes durchsuchen; erstes Datum-Match zurückgeben
               const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT)
-              const re = /\d{1,2}\.\s+\w+\s+\d{4}/
+              const re = /\d{4}[-\/]\d{2}[-\/]\d{2}|\d{1,2}[.\/-]\d{1,2}[.\/-]\d{4}|\d{1,2}\.\s+\w+\s+\d{4}|\w+\s+\d{1,2},?\s+\d{4}/
               let node: Node | null
               while ((node = walker.nextNode())) {
                 const t = (node.textContent ?? '').trim()
@@ -341,7 +512,7 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
               return null
             }, elementHandle).catch(() => null)
           }
-          const orderDate = parseGermanDate(dateText ?? '')
+          const orderDate = parseDate(dateText ?? '', locale)
           console.log(`[${ts()}] [loop_items] Element ${i + 1} Datum: "${orderDate ? orderDate.toLocaleDateString('de-DE') : 'nicht erkannt'}"`)
           if (orderDate) {
             const startDate = new Date(ctx.startDate)
@@ -349,7 +520,7 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
             if (orderDate < startDate) {
               console.log(`[${ts()}] [loop_items] Datum ${orderDate.toLocaleDateString('de-DE')} < startDate → stoppe Paginierung`)
               ctx.shouldStop = true
-              return  // Alle weiteren Items und Seiten überspringen
+              return
             }
           }
         }
@@ -358,6 +529,7 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
         const itemCtx: ExecutionContext = {
           ...ctx,
           itemLocator,
+          itemId,
         }
         for (const subStep of step.steps) {
           await executeStep(page, subStep, itemCtx)
@@ -371,7 +543,7 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
       const maxPages = step.max_pages ?? 50
       let pageNum = 0
       while (pageNum < maxPages) {
-        if (isSigninPage(page.url())) {
+        if (isAuthPage(page.url(), ctx.connector)) {
           console.log(`[paginate] Session abgelaufen auf Seite ${pageNum + 1} — breche ab`)
           ctx.onProgress?.('Session abgelaufen – bitte erneut ausführen', ctx.downloadCount?.value ?? 0)
           return
@@ -380,7 +552,6 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
         for (const subStep of step.steps) {
           await executeStep(page, subStep, ctx)
         }
-        // shouldStop wird von loop_items gesetzt wenn Datum-Grenze erreicht
         if (ctx.shouldStop) {
           console.log(`[${ts()}] [paginate] shouldStop — keine weiteren Seiten nötig`)
           break
@@ -413,13 +584,12 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
         await page.waitForTimeout(800)
         console.log(`[foreach_years] Gelandet auf: ${page.url()}`)
 
-        if (isSigninPage(page.url())) {
+        if (isAuthPage(page.url(), ctx.connector)) {
           console.log(`[foreach_years] Session abgelaufen bei Jahr ${year} — breche ab`)
           ctx.onProgress?.('Session abgelaufen – bitte erneut ausführen', ctx.downloadCount?.value ?? 0)
           return
         }
 
-        // Ausgabeordner pro Jahr auflösen: {year} und {month} ersetzen
         const yearOutputDir = ctx.outputDir
           .replace('{year}', year.toString())
           .replace('{month}', ctx.month)

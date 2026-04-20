@@ -1,8 +1,9 @@
+import fs from 'fs'
 import path from 'path'
 import { BrowserContext } from 'playwright'
 import type { ConnectorDef, ConnectorEvent } from '../../shared/connector.types'
 import type { RunResult } from '../../shared/ipc.types'
-import { openPersistentContext } from '../browser/playwright-manager'
+import { openPersistentContext, getProfileDir } from '../browser/playwright-manager'
 import { executeStep, ExecutionContext } from '../browser/step-executor'
 import { checkLogin } from './session-manager'
 import { waitForManualLogin, LoginCancelledError, LoginTimeoutError } from './login-window'
@@ -56,6 +57,18 @@ export async function runConnector(
       // Headless Context wieder öffnen — Profil enthält jetzt die frischen Login-Cookies
       context = await openPersistentContext(connector.id, true)
 
+      // Session-Cookies (ohne Ablaufdatum) werden nicht auf Disk geschrieben — manuell einlesen
+      const savedCookiesPath = path.join(getProfileDir(connector.id), 'saved-cookies.json')
+      if (fs.existsSync(savedCookiesPath)) {
+        try {
+          const cookies = JSON.parse(fs.readFileSync(savedCookiesPath, 'utf-8'))
+          await context.addCookies(cookies)
+          console.log(`[Login] ${cookies.length} Cookies aus Sicherung geladen`)
+        } catch (e) {
+          console.log(`[Login] Cookie-Import fehlgeschlagen: ${e}`)
+        }
+      }
+
       const verifyPage = await context.newPage()
       await verifyPage.goto(checkUrl, { waitUntil: 'load', timeout: 15000 }).catch(() => null)
       await verifyPage.waitForTimeout(1500)
@@ -77,6 +90,7 @@ export async function runConnector(
 
     const execCtx: ExecutionContext = {
       connectorId: connector.id,
+      connector,
       outputDir: outputPathTemplate,
       year,
       month,

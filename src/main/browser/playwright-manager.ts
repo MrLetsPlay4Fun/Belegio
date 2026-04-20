@@ -45,6 +45,7 @@ export async function openPersistentContext(
 
   return chromium.launchPersistentContext(profileDir, {
     headless,
+    acceptDownloads: true,
     executablePath: findExecutablePath(),
     args: headless
       ? ['--no-sandbox']
