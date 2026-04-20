@@ -30,6 +30,7 @@ export interface ElectronAPI {
   openFile: (filePath: string) => Promise<void>
   openFolder: (folderPath: string) => Promise<void>
   onConnectorEvent: (callback: (event: ConnectorEvent) => void) => () => void
+  getAppVersion: () => string
 }
 
 declare global {

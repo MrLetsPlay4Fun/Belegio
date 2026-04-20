@@ -20,7 +20,12 @@ export default function App() {
         height: 52,
         flexShrink: 0,
       }}>
-        <span style={{ fontWeight: 700, fontSize: 16, color: '#111' }}>🧾 Belegio</span>
+        <span style={{ fontWeight: 700, fontSize: 16, color: '#111' }}>
+          🧾 Belegio
+          <span style={{ fontWeight: 400, fontSize: 11, color: '#9ca3af', marginLeft: 6 }}>
+            v{window.electronAPI.getAppVersion()}
+          </span>
+        </span>
         <nav style={{ display: 'flex', gap: 4 }}>
           <TabButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')}>
             Konnektoren

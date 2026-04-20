@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'path'
 import { registerConnectorIpc } from './ipc/connector.ipc'
 import { registerDownloadIpc } from './ipc/download.ipc'
@@ -31,6 +31,8 @@ function createWindow(): BrowserWindow {
 
   return win
 }
+
+ipcMain.on('app:version', (event) => { event.returnValue = app.getVersion() })
 
 app.whenReady().then(() => {
   const win = createWindow()

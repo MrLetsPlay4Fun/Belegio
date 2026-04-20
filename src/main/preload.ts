@@ -24,6 +24,7 @@ const api: ElectronAPI = {
     ipcRenderer.on('connector:event', handler)
     return () => ipcRenderer.removeListener('connector:event', handler)
   },
+  getAppVersion: () => ipcRenderer.sendSync('app:version') as string,
 }
 
 contextBridge.exposeInMainWorld('electronAPI', api)
