@@ -1,0 +1,78 @@
+{
+  "id": "notebookgalerie",
+  "name": "Notebookgalerie",
+  "version": "1.0.0",
+  "baseUrl": "https://www.notebookgalerie.de",
+  "loginUrl": "https://www.notebookgalerie.de/customer/account/login/",
+  "loginCheckUrl": "https://www.notebookgalerie.de/customer/account/index/",
+  "loginCheck": {
+    "type": "url_not_contains",
+    "value": "/login"
+  },
+  "authUrlPatterns": ["/customer/account/login"],
+  "dateLocale": "dmy",
+  "invoiceSteps": [
+    {
+      "type": "navigate",
+      "url": "https://www.notebookgalerie.de/sales/order/history/"
+    },
+    {
+      "type": "wait_for",
+      "selector": ".data-table tbody tr, .orders-history tbody tr, table tbody tr",
+      "timeout": 8000
+    },
+    {
+      "type": "paginate",
+      "next_selector": "a.action.next, li.next a, a[title='Nächste'], a:has-text('Nächste')",
+      "max_pages": 50,
+      "steps": [
+        {
+          "type": "loop_items",
+          "item_selector": ".data-table tbody tr, .orders-history tbody tr, table tbody tr",
+          "date_selector": "td.col-date, .col.date, td:nth-child(2)",
+          "id_selector": "a[href*='/sales/order/view/']",
+          "id_attribute": "href",
+          "steps": [
+            {
+              "type": "navigate_link",
+              "selector": "a:has-text('Bestellung ansehen'), a[href*='/sales/order/view/']"
+            },
+            {
+              "type": "wait_for",
+              "selector": "a:has-text('Rechnungen'), a[href*='/sales/order/invoice/']",
+              "timeout": 6000
+            },
+            {
+              "type": "navigate_link",
+              "selector": "a:has-text('Rechnungen'), a[href*='/sales/order/invoice/']",
+              "optional": true
+            },
+            {
+              "type": "wait_for",
+              "selector": "a:has-text('Rechnung drucken'), a[href*='printInvoice'], button:has-text('Rechnung drucken')",
+              "timeout": 6000
+            },
+            {
+              "type": "download",
+              "selector": "a:has-text('Rechnung drucken'), a[href*='printInvoice'], button:has-text('Rechnung drucken')",
+              "filename_pattern": "Notebookgalerie_{id}",
+              "mode": "browser",
+              "optional": true
+            },
+            {
+              "type": "navigate",
+              "url": "https://www.notebookgalerie.de/sales/order/history/"
+            },
+            {
+              "type": "wait_for",
+              "selector": ".data-table tbody tr, .orders-history tbody tr, table tbody tr",
+              "timeout": 8000
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "outputPath": "Notebookgalerie/{year}/{month}",
+  "downloadExtensions": [".pdf"]
+}

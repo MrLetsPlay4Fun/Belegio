@@ -225,7 +225,8 @@ async function executeDownload(
         target.click().catch(reject)
       })
       const suggested = download.suggestedFilename()
-      const itemId = ctx.itemId ?? suggested.replace(/\.pdf$/i, '') ?? Date.now().toString()
+      // || statt ?? damit leere Strings ("") auch auf den Fallback fallen
+      const itemId = ctx.itemId || suggested.replace(/\.pdf$/i, '') || Date.now().toString()
       const filename = buildFilename(step.filename_pattern, { id: itemId, year: ctx.year, month: ctx.month })
       const destPath = path.join(outputDir, filename)
       const finalPath = getUniquePath(destPath)
@@ -486,7 +487,8 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
             const attr = step.id_attribute ?? 'href'
             const raw = await idEl.getAttribute(attr, { timeout: 800 }).catch(() => null)
             if (raw) {
-              itemId = raw.split('/').pop()?.split('?')[0] ?? undefined
+              // filter(Boolean) entfernt leere Strings durch Trailing Slashes (z.B. "/order/241779/")
+              itemId = raw.split('/').filter(Boolean).pop()?.split('?')[0] ?? undefined
             }
           } catch { /* ignorieren */ }
         }
