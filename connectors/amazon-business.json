@@ -6,8 +6,8 @@
   "loginUrl": "https://www.amazon.de/gp/sign-in.html",
   "loginCheckUrl": "https://www.amazon.de/gp/your-account/order-history",
   "loginCheck": {
-    "type": "url_not_contains",
-    "value": "/ap/"
+    "type": "element_exists",
+    "selector": ".a-box-group, .order-card"
   },
   "authUrlPatterns": ["/ap/", "signin", "sign-in", "openid.mode=checkid_setup"],
   "dateLocale": "de",
@@ -23,33 +23,14 @@
           "steps": [
             {
               "type": "loop_items",
-              "item_selector": ".a-box-group",
-              "date_selector": ".a-span3 .a-color-secondary, .a-column.a-span3 .value, [class*='date']",
+              "item_selector": ".a-box-group:has(a[href*='order-details'])",
               "steps": [
                 {
-                  "type": "if_found",
+                  "type": "download",
                   "selector": "a:has-text('Rechnung')",
-                  "steps": [
-                    {
-                      "type": "click",
-                      "selector": "a:has-text('Rechnung')",
-                      "js_click": true
-                    },
-                    {
-                      "type": "wait_for",
-                      "selector": "a[href*='/documents/download/']",
-                      "scope": "page",
-                      "timeout": 8000
-                    },
-                    {
-                      "type": "download",
-                      "selector": "a[href*='/documents/download/']",
-                      "filename_pattern": "AmazonBusiness_{id}",
-                      "mode": "fetch",
-                      "scope": "page",
-                      "optional": true
-                    }
-                  ]
+                  "filename_pattern": "AmazonBusiness_{id}",
+                  "mode": "fetch",
+                  "optional": true
                 }
               ]
             }

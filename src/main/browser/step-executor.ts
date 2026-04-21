@@ -242,16 +242,90 @@ async function executeDownload(
     return
   }
 
-  // ── href holen und absolute URL bauen ────────────────────────────────────────
+  // ── href holen — oder data-a-popover auflösen (z.B. Amazon Business) ────────
   const href = await target.getAttribute('href').catch(() => null)
-  if (!href) {
-    if (step.optional) {
-      console.log(`[download] – Kein href-Attribut, übersprungen`)
-      return
+  let invoiceUrl: string
+
+  if (!href || href.startsWith('javascript:')) {
+    // Kein direktes href → data-a-popover auf Element oder Eltern suchen
+    console.log(`[${ts()}] [download] Kein direktes href — suche data-a-popover…`)
+
+    const popoverJson = await target.evaluate((el: Element): string | null => {
+      for (let cur: Element | null = el; cur && cur !== document.body; cur = cur.parentElement) {
+        const v = cur.getAttribute('data-a-popover')
+        if (v) return v
+      }
+      return null
+    }).catch(() => null) as string | null
+
+    if (!popoverJson) {
+      if (step.optional) { console.log(`[${ts()}] [download] – Kein href und kein data-a-popover, übersprungen`); return }
+      throw new Error(`Kein href für Download-Element: ${step.selector}`)
     }
-    throw new Error(`Kein href für Download-Element: ${step.selector}`)
+
+    console.log(`[${ts()}] [download] data-a-popover: ${popoverJson.slice(0, 300)}`)
+
+    let pdfUrl: string | null = null
+    const PDF_RE = /href=["']([^"']*\/documents\/download\/[^"']*\.pdf[^"']*)["']/
+
+    try {
+      const cfg = JSON.parse(popoverJson) as Record<string, unknown>
+
+      // Fall A: Inhalt ist direkt eingebettet (inlineContent)
+      const inline = cfg.inlineContent as string | undefined
+      if (inline) {
+        const m = inline.match(PDF_RE)
+        if (m) pdfUrl = m[1].startsWith('http') ? m[1] : new URL(m[1], page.url()).toString()
+      }
+
+      // Fall B: Inhalt wird per AJAX geladen (url-Feld)
+      if (!pdfUrl && cfg.url) {
+        const popUrl = cfg.url as string
+        const absUrl = popUrl.startsWith('http') ? popUrl : new URL(popUrl, page.url()).toString()
+        console.log(`[${ts()}] [download] Lade Popover-Inhalt von: ${absUrl}`)
+
+        const html = await page.evaluate(async (u: string) => {
+          try {
+            const r = await fetch(u, { credentials: 'include' })
+            return r.ok ? await r.text() : null
+          } catch { return null }
+        }, absUrl).catch(() => null) as string | null
+
+        if (html) {
+          // ── Rechnungsdatum aus Popover-HTML prüfen ────────────────────────────
+          if (ctx.startDate) {
+            const dateMatch = html.match(/(\d{1,2})\.\s+(\w+)\s+(\d{4})/)
+            if (dateMatch) {
+              const invoiceDate = parseGermanDate(dateMatch[0])
+              if (invoiceDate) {
+                const startDate = new Date(ctx.startDate)
+                startDate.setHours(0, 0, 0, 0)
+                if (invoiceDate < startDate) {
+                  console.log(`[${ts()}] [download] Rechnungsdatum ${invoiceDate.toLocaleDateString('de-DE')} < startDate → übersprungen`)
+                  return
+                }
+                console.log(`[${ts()}] [download] Rechnungsdatum: ${invoiceDate.toLocaleDateString('de-DE')} ✓`)
+              }
+            }
+          }
+          const m = html.match(PDF_RE)
+          if (m) pdfUrl = m[1].startsWith('http') ? m[1] : new URL(m[1], page.url()).toString()
+          else console.log(`[${ts()}] [download] Popover-HTML (kein PDF-Match):\n${html.slice(0, 1500)}`)
+        }
+      }
+    } catch (e) {
+      console.log(`[${ts()}] [download] Popover-Parse-Fehler: ${e}`)
+    }
+
+    if (!pdfUrl) {
+      if (step.optional) { console.log(`[${ts()}] [download] – Kein PDF-Link im Popover gefunden, übersprungen`); return }
+      throw new Error(`Kein PDF-Link im Popover: ${step.selector}`)
+    }
+    invoiceUrl = pdfUrl
+  } else {
+    invoiceUrl = href.startsWith('http') ? href : new URL(href, page.url()).toString()
   }
-  const invoiceUrl = href.startsWith('http') ? href : new URL(href, page.url()).toString()
+
   console.log(`[${ts()}] [download] Invoice-URL: ${invoiceUrl}`)
 
   // ── downloadExtensions filtern ────────────────────────────────────────────────
@@ -499,6 +573,8 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
       console.log(`[${ts()}] [loop_items] Gefundene Elemente für "${step.item_selector}": ${count} auf ${page.url()}`)
       const locale = ctx.connector?.dateLocale ?? 'de'
 
+      let consecutiveOldItems = 0
+
       for (let i = 0; i < count; i++) {
         const itemLocator = page.locator(step.item_selector).nth(i)
 
@@ -510,7 +586,6 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
             const attr = step.id_attribute ?? 'href'
             const raw = await idEl.getAttribute(attr, { timeout: 800 }).catch(() => null)
             if (raw) {
-              // filter(Boolean) entfernt leere Strings durch Trailing Slashes (z.B. "/order/241779/")
               itemId = raw.split('/').filter(Boolean).pop()?.split('?')[0] ?? undefined
             }
           } catch { /* ignorieren */ }
@@ -520,10 +595,14 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
         if (ctx.startDate) {
           let dateText: string | null = null
           if (step.date_selector) {
-            dateText = await itemLocator.locator(step.date_selector).first()
-              .textContent({ timeout: 800 }).catch(() => null)
+            // Alle Kandidaten aus dem Selektor prüfen — ersten nehmen der ein echtes Datum enthält
+            const nodes = await itemLocator.locator(step.date_selector).all().catch(() => [])
+            for (const node of nodes) {
+              const t = await node.textContent({ timeout: 400 }).catch(() => null)
+              if (t && parseDate(t.trim(), locale)) { dateText = t.trim(); break }
+            }
           }
-          if (!dateText || !parseDate(dateText, locale)) {
+          if (!dateText) {
             const elementHandle = await itemLocator.elementHandle({ timeout: 2000 }).catch(() => null)
             dateText = await page.evaluate((card) => {
               if (!card) return null
@@ -543,11 +622,17 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
             const startDate = new Date(ctx.startDate)
             startDate.setHours(0, 0, 0, 0)
             if (orderDate < startDate) {
-              console.log(`[${ts()}] [loop_items] Datum ${orderDate.toLocaleDateString('de-DE')} < startDate → stoppe Paginierung`)
-              ctx.shouldStop = true
-              return
+              consecutiveOldItems++
+              console.log(`[${ts()}] [loop_items] Datum ${orderDate.toLocaleDateString('de-DE')} < startDate → übersprungen (${consecutiveOldItems} in Folge)`)
+              if (consecutiveOldItems >= 3) {
+                console.log(`[${ts()}] [loop_items] ${consecutiveOldItems} aufeinanderfolgende alte Einträge → stoppe Paginierung`)
+                ctx.shouldStop = true
+                return
+              }
+              continue
             }
           }
+          consecutiveOldItems = 0
         }
 
         console.log(`[${ts()}] [loop_items] Verarbeite Element ${i + 1}/${count}`)
