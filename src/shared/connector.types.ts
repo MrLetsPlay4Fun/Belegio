@@ -1,9 +1,10 @@
 export type Step =
   | { type: 'navigate'; url: string }
   | { type: 'navigate_link'; selector: string; optional?: boolean }
-  | { type: 'click'; selector: string; optional?: boolean }
-  | { type: 'wait_for'; selector: string; timeout?: number }
-  | { type: 'download'; selector: string; filename_pattern?: string; optional?: boolean; mode?: 'browser' | 'fetch' | 'page-pdf' }
+  | { type: 'click'; selector: string; optional?: boolean; js_click?: boolean }
+  | { type: 'wait_for'; selector: string; timeout?: number; scope?: 'page' }
+  | { type: 'download'; selector: string; filename_pattern?: string; optional?: boolean; mode?: 'browser' | 'fetch' | 'page-pdf'; scope?: 'page'; timeout?: number }
+  | { type: 'if_found'; selector: string; steps: Step[]; scope?: 'page' }
   | { type: 'paginate'; next_selector: string; steps: Step[]; max_pages?: number }
   | { type: 'loop_items'; item_selector: string; steps: Step[]; date_selector?: string; id_selector?: string; id_attribute?: string }
   | { type: 'foreach_years'; url_template: string; steps: Step[] }

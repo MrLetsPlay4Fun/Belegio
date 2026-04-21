@@ -186,12 +186,12 @@ async function executeDownload(
     .replace('{year}', ctx.year)
     .replace('{month}', ctx.month)
 
-  const target = ctx.itemLocator
+  const target = (ctx.itemLocator && step.scope !== 'page')
     ? ctx.itemLocator.locator(step.selector).first()
     : page.locator(step.selector).first()
 
   try {
-    await target.waitFor({ state: 'attached', timeout: step.optional ? 800 : 3000 })
+    await target.waitFor({ state: 'attached', timeout: step.timeout ?? (step.optional ? 2000 : 8000) })
     console.log(`[${ts()}] [download] ✓ Element gefunden: ${step.selector}`)
   } catch {
     if (step.optional) {
@@ -271,6 +271,7 @@ async function executeDownload(
     ?? invoiceUrl.match(/[?&]orderId=([A-Z0-9-]+)/i)?.[1]
     ?? invoiceUrl.match(/[?&]orderID=([A-Z0-9-]+)/i)?.[1]
     ?? invoiceUrl.match(/\/([0-9]{3}-[0-9]{7}-[0-9]{7})/)?.[1]
+    ?? invoiceUrl.match(/\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\//i)?.[1]
     ?? Date.now().toString()
 
   try {
@@ -440,8 +441,13 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
         ? ctx.itemLocator.locator(step.selector).first()
         : page.locator(step.selector).first()
       try {
-        await target.waitFor({ state: 'visible', timeout: 3000 })
-        await target.click()
+        await target.waitFor({ state: 'attached', timeout: step.optional ? 500 : 3000 })
+        if (step.js_click) {
+          // Trusted click via page context — löst Amazon A+ Popovers aus (isTrusted: true)
+          await target.evaluate((el: HTMLElement) => el.click())
+        } else {
+          await target.click()
+        }
         console.log(`[click] ✓ Geklickt: ${step.selector}`)
       } catch {
         if (step.optional) {
@@ -455,12 +461,29 @@ export async function executeStep(page: Page, step: Step, ctx: ExecutionContext)
 
     case 'wait_for': {
       try {
-        const target = ctx.itemLocator
+        const target = (ctx.itemLocator && step.scope !== 'page')
           ? ctx.itemLocator.locator(step.selector).first()
           : page.locator(step.selector).first()
         await target.waitFor({ state: 'attached', timeout: step.timeout ?? 5000 })
+        console.log(`[wait_for] ✓ Gefunden: ${step.selector}`)
       } catch {
         // Kein Fehler — Element ist möglicherweise optional
+      }
+      break
+    }
+
+    case 'if_found': {
+      const target = (ctx.itemLocator && step.scope !== 'page')
+        ? ctx.itemLocator.locator(step.selector).first()
+        : page.locator(step.selector).first()
+      const found = await target.isVisible().catch(() => false)
+      if (found) {
+        console.log(`[if_found] ✓ Gefunden — führe Sub-Steps aus: ${step.selector}`)
+        for (const subStep of step.steps) {
+          await executeStep(page, subStep, ctx)
+        }
+      } else {
+        console.log(`[if_found] – Nicht gefunden, übersprungen: ${step.selector}`)
       }
       break
     }

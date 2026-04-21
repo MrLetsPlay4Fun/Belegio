@@ -1,0 +1,63 @@
+{
+  "id": "amazon-business",
+  "name": "Amazon Business",
+  "version": "1.0.0",
+  "baseUrl": "https://www.amazon.de",
+  "loginUrl": "https://www.amazon.de/gp/sign-in.html",
+  "loginCheckUrl": "https://www.amazon.de/gp/your-account/order-history",
+  "loginCheck": {
+    "type": "url_not_contains",
+    "value": "/ap/"
+  },
+  "authUrlPatterns": ["/ap/", "signin", "sign-in", "openid.mode=checkid_setup"],
+  "dateLocale": "de",
+  "invoiceSteps": [
+    {
+      "type": "foreach_years",
+      "url_template": "https://www.amazon.de/gp/your-account/order-history?orderFilter=year-{year}",
+      "steps": [
+        {
+          "type": "paginate",
+          "next_selector": ".a-last:not(.a-disabled) a",
+          "max_pages": 20,
+          "steps": [
+            {
+              "type": "loop_items",
+              "item_selector": ".a-box-group",
+              "date_selector": ".a-span3 .a-color-secondary, .a-column.a-span3 .value, [class*='date']",
+              "steps": [
+                {
+                  "type": "if_found",
+                  "selector": "a:has-text('Rechnung')",
+                  "steps": [
+                    {
+                      "type": "click",
+                      "selector": "a:has-text('Rechnung')",
+                      "js_click": true
+                    },
+                    {
+                      "type": "wait_for",
+                      "selector": "a[href*='/documents/download/']",
+                      "scope": "page",
+                      "timeout": 8000
+                    },
+                    {
+                      "type": "download",
+                      "selector": "a[href*='/documents/download/']",
+                      "filename_pattern": "AmazonBusiness_{id}",
+                      "mode": "fetch",
+                      "scope": "page",
+                      "optional": true
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "outputPath": "Amazon Business/{year}/{month}",
+  "downloadExtensions": [".pdf"]
+}
