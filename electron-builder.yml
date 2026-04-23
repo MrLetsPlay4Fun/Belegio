@@ -41,6 +41,6 @@ nsis:
 # GitHub Releases – Upload erfolgt mit: GH_TOKEN=... npm run dist
 publish:
   provider: github
-  owner: MrLetsPlay4Fun
+  owner: AxonByteDev
   repo: Belegio
   releaseType: release
