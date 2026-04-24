@@ -41,14 +41,16 @@ nsis:
 mac:
   icon: assets/icon.png
   artifactName: "${productName}-${version}.${ext}"
-  # Ad-hoc Signatur (kein Apple Developer Account) —
-  # Nutzer müssen beim ersten Öffnen Rechtsklick → Öffnen wählen (Gatekeeper).
-  # Auto-Update zeigt nur einen Hinweis mit Download-Link.
-  identity: '-'
+  # Keine Code-Signatur (kein Apple Developer Account) —
+  # afterPack-Hook erstellt korrekte ad-hoc Signatur damit macOS
+  # "unbekannter Entwickler" statt "beschädigt" anzeigt.
+  identity: null
   hardenedRuntime: false
   target:
     - target: dmg
     - target: zip
+
+afterPack: scripts/mac-adhoc-sign.js
 
 dmg:
   title: "${productName} ${version}"
