@@ -1,13 +1,13 @@
 name: Build & Release
 
-# Startet automatisch wenn ein Tag wie "v1.3.2" gepusht wird
+# Startet automatisch wenn ein Tag wie "v1.3.2" oder "v1.3.2-beta.1" gepusht wird
 on:
   push:
     tags:
       - 'v*'
 
 permissions:
-  contents: write  # Erlaubt das Hochladen von Release-Artefakten
+  contents: write
 
 jobs:
   build:
@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            script: dist:mac
+            eb_args: --mac
           - os: windows-latest
-            script: dist:win
+            eb_args: --win
 
     runs-on: ${{ matrix.os }}
 
@@ -35,7 +35,23 @@ jobs:
       - name: Icons generieren
         run: node scripts/generate-icon.mjs
 
-      - name: Bauen & auf GitHub Release hochladen
-        run: npm run ${{ matrix.script }}
+      - name: winCodeSign-Cache vorbereiten (nur Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/setup-wincosign-cache.js
+
+      - name: Bauen
+        run: npm run build
+
+      # Prerelease: Tag enthält "-" z.B. v1.3.2-beta.1 → kein "latest", kein Auto-Update
+      - name: Hochladen als Prerelease
+        if: contains(github.ref_name, '-')
+        run: npx electron-builder ${{ matrix.eb_args }} --config.publish.releaseType=prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Stable: Tag ohne "-" z.B. v1.3.2 → bekommt "latest", löst Auto-Update aus
+      - name: Hochladen als Release
+        if: "!contains(github.ref_name, '-')"
+        run: npx electron-builder ${{ matrix.eb_args }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
