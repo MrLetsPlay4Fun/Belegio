@@ -48,8 +48,7 @@ jobs:
         run: npx electron-builder ${{ matrix.eb_args }} --config.publish.releaseType=prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       # Stable: Tag ohne "-" z.B. v1.3.2 → bekommt "latest", löst Auto-Update aus
       - name: Hochladen als Release
@@ -57,5 +56,4 @@ jobs:
         run: npx electron-builder ${{ matrix.eb_args }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false

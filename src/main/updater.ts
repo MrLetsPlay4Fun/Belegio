@@ -1,13 +1,19 @@
 import { autoUpdater } from 'electron-updater'
-import { dialog, BrowserWindow } from 'electron'
+import { dialog, shell, BrowserWindow } from 'electron'
 import log from 'electron-log'
 
 export function initAutoUpdater(win: BrowserWindow): void {
-  // Kein automatisches Download – wir fragen zuerst
+  // macOS: Squirrel.Mac erfordert Code-Signatur (Apple Developer Account).
+  // Ohne Signatur schlägt die Installation fehl → nur Hinweis mit Download-Link.
+  if (process.platform === 'darwin') {
+    initMacUpdateHint(win)
+    return
+  }
+
+  // Windows: vollständiger Auto-Updater
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
 
-  // Logging in Datei — hilft bei der Fehlersuche
   autoUpdater.logger = log
   log.transports.file.level = 'info'
 
@@ -54,7 +60,6 @@ export function initAutoUpdater(win: BrowserWindow): void {
   autoUpdater.on('error', (err) => {
     win.setProgressBar(-1)
     win.setTitle('Belegio')
-    // 404 / "Cannot find" = kein Release-Artefakt hochgeladen — kein Dialog
     if (err.message?.includes('404') || err.message?.includes('Cannot find')) {
       log.warn('[updater] Kein Update-Artefakt gefunden:', err.message)
       return
@@ -69,7 +74,42 @@ export function initAutoUpdater(win: BrowserWindow): void {
     })
   })
 
-  // Update-Check 3 Sekunden nach Start (damit das Fenster schon sichtbar ist)
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      log.warn('[updater] Kein Update-Check möglich:', err.message)
+    })
+  }, 3000)
+}
+
+/** macOS: nur auf neue Version hinweisen, Download-Link öffnen. */
+function initMacUpdateHint(win: BrowserWindow): void {
+  autoUpdater.autoDownload = false
+  autoUpdater.logger = log
+
+  autoUpdater.on('update-available', (info) => {
+    dialog.showMessageBox(win, {
+      type: 'info',
+      title: 'Update verfügbar',
+      message: `Belegio ${info.version} ist verfügbar.`,
+      detail: 'Bitte lade die neue Version manuell herunter und installiere sie.',
+      buttons: ['Zu den Downloads', 'Später'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response === 0) {
+        shell.openExternal('https://github.com/AxonByteDev/Belegio/releases/latest')
+      }
+    })
+  })
+
+  autoUpdater.on('error', (err) => {
+    if (err.message?.includes('404') || err.message?.includes('Cannot find')) {
+      log.warn('[updater] Kein macOS-Release gefunden:', err.message)
+      return
+    }
+    log.warn('[updater] macOS Update-Check fehlgeschlagen:', err.message)
+  })
+
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch((err) => {
       log.warn('[updater] Kein Update-Check möglich:', err.message)
