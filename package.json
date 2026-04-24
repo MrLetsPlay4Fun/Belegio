@@ -1,6 +1,6 @@
 {
   "name": "belegio",
-  "version": "1.3.2-beta.1",
+  "version": "1.3.2",
   "description": "Automatischer Beleg-Downloader für den Steuerberater",
   "author": "Alexander Hippler <alexander@hippler.one>",
   "main": "dist/src/main/index.js",
