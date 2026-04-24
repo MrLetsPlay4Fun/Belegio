@@ -13,6 +13,11 @@ const path = require('path')
 const fs   = require('fs')
 const os   = require('os')
 
+if (process.platform !== 'win32') {
+  console.log('[setup] Nicht Windows — winCodeSign-Cache-Setup wird übersprungen.')
+  process.exit(0)
+}
+
 const VERSION    = 'winCodeSign-2.6.0'
 const URL        = `https://github.com/electron-userland/electron-builder-binaries/releases/download/${VERSION}/${VERSION}.7z`
 const CACHE_DIR  = path.join(os.homedir(), 'AppData', 'Local', 'electron-builder', 'Cache', 'winCodeSign')

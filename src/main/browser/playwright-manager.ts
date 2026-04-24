@@ -5,6 +5,20 @@ import os from 'os'
 import fs from 'fs'
 
 function findExecutablePath(): string | undefined {
+  if (process.platform === 'darwin') {
+    const macPaths = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      path.join(os.homedir(), 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'),
+      path.join(os.homedir(), 'Applications', 'Microsoft Edge.app', 'Contents', 'MacOS', 'Microsoft Edge'),
+    ]
+    const found = macPaths.find(p => fs.existsSync(p))
+    if (found) { console.log('[Browser] Nutze System-Browser:', found); return found }
+    console.log('[Browser] Nutze Playwright-Browser')
+    return undefined
+  }
+
+  // Windows
   const edgePaths = [
     path.join('C:\\', 'Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     path.join('C:\\', 'Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
@@ -47,9 +61,9 @@ export async function openPersistentContext(
     headless,
     acceptDownloads: true,
     executablePath: findExecutablePath(),
-    args: headless
-      ? ['--no-sandbox']
-      : ['--no-sandbox', '--start-maximized'],
+    args: process.platform === 'darwin'
+      ? (headless ? [] : ['--start-maximized'])
+      : (headless ? ['--no-sandbox'] : ['--no-sandbox', '--start-maximized']),
   })
 }
 

@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { loadConnectors, getUserConnectorsDir } from '../connector/loader'
 import { runConnector } from '../connector/runner'
-import { getConnectorConfig, setConnectorConfig, getGlobalStartDate, setGlobalStartDate, getDownloadRoot, setDownloadRoot } from '../store/app-store'
+import { getConnectorConfig, setConnectorConfig, getGlobalStartDate, setGlobalStartDate, getDownloadRoot, setDownloadRoot, getSelectedConnectorIds, setSelectedConnectorIds } from '../store/app-store'
 import type { ConnectorDef, ConnectorStatus, ConnectorEvent } from '../../shared/connector.types'
 import type { RunResult } from '../../shared/ipc.types'
 
@@ -30,6 +30,9 @@ export function registerConnectorIpc(win: BrowserWindow): void {
 
   ipcMain.handle('settings:global-start-date:get', () => getGlobalStartDate())
   ipcMain.handle('settings:global-start-date:set', (_event, { date }: { date: string }) => setGlobalStartDate(date))
+
+  ipcMain.handle('settings:selected-connectors:get', () => getSelectedConnectorIds())
+  ipcMain.handle('settings:selected-connectors:set', (_event, { ids }: { ids: string[] }) => setSelectedConnectorIds(ids))
 
   ipcMain.handle('settings:download-root:get', () => getDownloadRoot())
   ipcMain.handle('settings:download-root:set', (_event, { path }: { path: string }) => setDownloadRoot(path))

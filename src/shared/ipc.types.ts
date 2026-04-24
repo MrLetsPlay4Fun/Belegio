@@ -22,6 +22,8 @@ export interface ElectronAPI {
   setConnectorConfig: (connectorId: string, config: Partial<ConnectorConfig>) => Promise<void>
   getGlobalStartDate: () => Promise<string>
   setGlobalStartDate: (date: string) => Promise<void>
+  getSelectedConnectors: () => Promise<string[] | null>
+  setSelectedConnectors: (ids: string[]) => Promise<void>
   getDownloadRoot: () => Promise<string>
   setDownloadRoot: (path: string) => Promise<void>
   selectFolder: () => Promise<string | null>

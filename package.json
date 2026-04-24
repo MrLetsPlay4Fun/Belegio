@@ -14,6 +14,8 @@
     "build:main": "tsc -p src/main/tsconfig.json",
     "predist": "node scripts/setup-wincosign-cache.js",
     "dist": "npm run build && npx electron-builder",
+    "dist:win": "npm run dist",
+    "dist:mac": "npm run build && npx electron-builder --mac",
     "playwright:install": "node node_modules/playwright/cli.js install chromium"
   },
   "devDependencies": {

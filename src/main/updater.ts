@@ -55,6 +55,11 @@ export function initAutoUpdater(win: BrowserWindow): void {
   autoUpdater.on('error', (err) => {
     win.setProgressBar(-1)
     win.setTitle('Belegio')
+    // 404 / "Cannot find" = kein Release für diese Plattform hochgeladen — kein Dialog
+    if (err.message?.includes('404') || err.message?.includes('Cannot find')) {
+      log.warn('[updater] Kein Update-Artefakt gefunden (noch nicht hochgeladen?):', err.message)
+      return
+    }
     log.error('[updater] Fehler:', err)
     dialog.showMessageBox(win, {
       type: 'error',

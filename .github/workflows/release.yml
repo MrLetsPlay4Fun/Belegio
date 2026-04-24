@@ -1,0 +1,41 @@
+name: Build & Release
+
+# Startet automatisch wenn ein Tag wie "v1.3.2" gepusht wird
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # Erlaubt das Hochladen von Release-Artefakten
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+          - os: windows-latest
+            script: dist:win
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: Icons generieren
+        run: node scripts/generate-icon.mjs
+
+      - name: Bauen & auf GitHub Release hochladen
+        run: npm run ${{ matrix.script }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

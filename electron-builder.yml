@@ -38,6 +38,20 @@ nsis:
     - de_DE
   license: null
 
+mac:
+  icon: assets/icon.png
+  artifactName: "${productName}-${version}.${ext}"
+  # Keine Code-Signatur (kein Apple Developer Account vorhanden)
+  # Nutzer müssen beim ersten Öffnen Rechtsklick → Öffnen wählen (Gatekeeper)
+  identity: null
+  hardenedRuntime: false
+  target:
+    - target: dmg
+
+dmg:
+  title: "${productName} ${version}"
+  internetEnabled: false
+
 # GitHub Releases – Upload erfolgt mit: GH_TOKEN=... npm run dist
 publish:
   provider: github

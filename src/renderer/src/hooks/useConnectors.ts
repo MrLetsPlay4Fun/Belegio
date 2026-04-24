@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import type { ConnectorDef, ConnectorStatus, ConnectorEvent } from '../../../shared/connector.types'
 import { api } from '../api/ipc'
 
@@ -9,6 +9,8 @@ export function useConnectors() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [globalStartDate, setGlobalStartDateState] = useState<string>('')
   const [isRunningAll, setIsRunningAll] = useState(false)
+  // Verhindert, dass refresh() nach runAll() die Auswahl überschreibt
+  const selectionInitialized = useRef(false)
 
   const refresh = useCallback(async () => {
     const [defs, statusList, date] = await Promise.all([
@@ -16,15 +18,23 @@ export function useConnectors() {
       api.getConnectorStatuses(),
       api.getGlobalStartDate(),
     ])
+    const savedIds = await api.getSelectedConnectors().catch(() => null)
     setConnectors(defs)
     setStatuses(new Map(statusList.map(s => [s.connectorId, s])))
     if (date) setGlobalStartDateState(date)
 
-    // Alle Konnektoren standardmäßig auswählen
-    setSelectedIds(prev => {
-      if (prev.size === 0) return new Set(defs.map(c => c.id))
-      return prev
-    })
+    if (!selectionInitialized.current) {
+      selectionInitialized.current = true
+      if (savedIds === null) {
+        // Erster Start: alle auswählen und sofort speichern
+        const allIds = defs.map(c => c.id)
+        setSelectedIds(new Set(allIds))
+        api.setSelectedConnectors(allIds)
+      } else {
+        // Gespeicherte Auswahl wiederherstellen (nicht mehr vorhandene IDs entfernen)
+        setSelectedIds(new Set(savedIds.filter(id => defs.some(d => d.id === id))))
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -92,24 +102,36 @@ export function useConnectors() {
       const next = new Set(prev)
       if (next.has(connectorId)) next.delete(connectorId)
       else next.add(connectorId)
+      api.setSelectedConnectors(Array.from(next))
       return next
     })
   }, [])
 
   const selectAll = useCallback((ids: string[]) => {
     setSelectedIds(new Set(ids))
+    api.setSelectedConnectors(ids)
   }, [])
 
   const deselectAll = useCallback(() => {
     setSelectedIds(new Set())
+    api.setSelectedConnectors([])
   }, [])
 
   const clearSession = useCallback(async (connectorId: string) => {
     await api.clearSession(connectorId)
   }, [])
 
+  // Angehakte Konnektoren immer oben, innerhalb jeder Gruppe bleibt die Originalreihenfolge
+  const sortedConnectors = useMemo(() => {
+    return [...connectors].sort((a, b) => {
+      const aChecked = selectedIds.has(a.id) ? 0 : 1
+      const bChecked = selectedIds.has(b.id) ? 0 : 1
+      return aChecked - bChecked
+    })
+  }, [connectors, selectedIds])
+
   return {
-    connectors,
+    connectors: sortedConnectors,
     statuses,
     messages,
     selectedIds,

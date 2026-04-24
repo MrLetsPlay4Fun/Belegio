@@ -37,6 +37,12 @@ export const api = {
   setGlobalStartDate: (date: string): Promise<void> =>
     getAPI().setGlobalStartDate(date),
 
+  getSelectedConnectors: (): Promise<string[] | null> =>
+    isElectron ? getAPI().getSelectedConnectors() : Promise.resolve(null),
+
+  setSelectedConnectors: (ids: string[]): Promise<void> =>
+    isElectron ? getAPI().setSelectedConnectors(ids) : Promise.resolve(),
+
   getDownloadRoot: (): Promise<string> =>
     isElectron ? getAPI().getDownloadRoot() : Promise.resolve(''),
 

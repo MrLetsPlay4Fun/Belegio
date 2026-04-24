@@ -14,6 +14,8 @@ interface StoreSchema {
     downloadRoot: string
     globalStartDate: string
   }
+  // Nicht in defaults — undefined bedeutet "noch nie gesetzt" → beim Start alle auswählen
+  selectedConnectorIds?: string[]
 }
 
 function defaultStartDate(): string {
@@ -91,6 +93,15 @@ export function addDownloadRecord(record: DownloadRecord): void {
   const downloads = store.get('downloads')
   downloads.push(record)
   store.set('downloads', downloads)
+}
+
+// Gespeicherte Konnektor-Auswahl
+export function getSelectedConnectorIds(): string[] | null {
+  return store.get('selectedConnectorIds') ?? null
+}
+
+export function setSelectedConnectorIds(ids: string[]): void {
+  store.set('selectedConnectorIds', ids)
 }
 
 export function getDownloadRecords(connectorId?: string): DownloadRecord[] {

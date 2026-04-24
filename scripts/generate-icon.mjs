@@ -55,7 +55,13 @@ async function main() {
   const icoBuffer = await pngToIco(pngBuffers)
   const outPath = path.join(__dirname, '..', 'assets', 'icon.ico')
   fs.writeFileSync(outPath, icoBuffer)
-  console.log(`✓ Icon generiert: ${outPath} (${sizes.join(', ')} px)`)
+  console.log(`✓ Windows-Icon generiert: ${outPath} (${sizes.join(', ')} px)`)
+
+  // macOS braucht ein hochauflösendes PNG (electron-builder konvertiert es per sips zu .icns)
+  const png1024 = await sharp(Buffer.from(svg)).resize(1024, 1024).png().toBuffer()
+  const pngPath = path.join(__dirname, '..', 'assets', 'icon.png')
+  fs.writeFileSync(pngPath, png1024)
+  console.log(`✓ macOS-Icon generiert:   ${pngPath} (1024x1024 px)`)
 }
 
 main().catch(console.error)
